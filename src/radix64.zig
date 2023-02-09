@@ -3,7 +3,7 @@
 //! of two parts: a base64 encoding of the binary data and a checksum.
 
 /// A 24-bit checksum
-pub const Crc24 = u24;
+pub const Crc24 = [3]u8;
 
 /// Calculate a 24-bit checksum for the given binary data
 ///
@@ -15,16 +15,17 @@ pub fn crcFromOctets(octets: []const u8) Crc24 {
 
     var crc: u32 = CRC24_INIT;
     for (octets) |octet| {
-        crc ^= (octet << 16);
+        crc ^= (@intCast(u32, octet) << 16);
 
         var i: u8 = 0;
         while (i < 8) : (i += 1) {
             crc <<= 1;
-            if (crc & 0x1000000) crc ^= CRC24_POLY;
+            if (crc & 0x1000000 != 0) crc ^= CRC24_POLY;
         }
     }
 
-    return @intCast(Crc24, crc & 0xFFFFFF);
+    crc &= 0xFFFFFF;
+    return .{ @intCast(u8, (crc >> 16) & 0xFF), @intCast(u8, (crc >> 8) & 0xFF), @intCast(u8, crc & 0xFF) };
 }
 
 /// Encode the given input data into Radix-64
@@ -166,4 +167,18 @@ test "decode radix-64" {
     try testDecode("\x14\xFB\x9C\x03\xD9\x7E", "FPucA9l+");
     try testDecode("\x14\xFB\x9C\x03\xD9", "FPucA9k=");
     try testDecode("\x14\xFB\x9C\x03", "FPucAw==");
+}
+
+test "decode packet and calculate crc24" {
+    const allocator = std.testing.allocator;
+    var raw = std.ArrayList(u8).init(allocator);
+    var crc_enc = std.ArrayList(u8).init(allocator);
+    defer raw.deinit();
+    defer crc_enc.deinit();
+
+    try decode(raw.writer(), "yDgBO22WxBHv7O8X7O/jygAEzol56iUKiXmV+XmpCtmpqQUKiQrFqclFqUDBovzSvBSFjNSiVHsuAA==");
+    const crc = crcFromOctets(raw.items[0..]);
+    try encode(crc_enc.writer(), crc[0..]);
+
+    try std.testing.expectEqualStrings("njUN", crc_enc.items);
 }
